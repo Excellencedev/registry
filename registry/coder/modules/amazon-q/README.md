@@ -148,7 +148,7 @@ To use Amazon Q with the Coder Tasks template:
 
 1. First, deploy the [Tasks on Docker](https://registry.coder.com/templates/coder-labs/tasks-docker) template
 2. Replace the Claude Code module with the Amazon Q module in the template
-3. Add your Amazon Q authentication tarball as a parameter
+3. Add your Amazon Q authentication tarball as a parameter.
 
 Example configuration in the Tasks template:
 
