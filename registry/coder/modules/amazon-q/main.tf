@@ -4,7 +4,7 @@ terraform {
   required_providers {
     coder = {
       source  = "coder/coder"
-      version = ">= 2.5"
+      version = ">= 2.7"
     }
   }
 }
@@ -84,6 +84,90 @@ variable "experiment_post_install_script" {
   default     = null
 }
 
+variable "install_agentapi" {
+  type        = bool
+  description = "Whether to install AgentAPI."
+  default     = true
+}
+
+variable "agentapi_version" {
+  type        = string
+  description = "The version of AgentAPI to install."
+  default     = "v0.3.3"
+}
+
+variable "agentapi_subdomain" {
+  type        = bool
+  description = "Whether to use a subdomain for AgentAPI."
+  default     = true
+}
+
+variable "agentapi_port" {
+  type        = number
+  description = "The port used by AgentAPI."
+  default     = 3284
+}
+
+variable "web_app_order" {
+  type        = number
+  description = "The order determines the position of app in the UI presentation. The lowest order is shown first and apps with equal order are sorted by name (ascending order)."
+  default     = null
+}
+
+variable "web_app_group" {
+  type        = string
+  description = "The name of a group that this app belongs to."
+  default     = null
+}
+
+variable "web_app_icon" {
+  type        = string
+  description = "The icon to use for the app."
+  default     = "/icon/amazon-q.svg"
+}
+
+variable "web_app_display_name" {
+  type        = string
+  description = "The display name of the web app."
+  default     = "Amazon Q"
+}
+
+variable "cli_app" {
+  type        = bool
+  description = "Whether to create the CLI workspace app."
+  default     = false
+}
+
+variable "cli_app_order" {
+  type        = number
+  description = "The order of the CLI workspace app."
+  default     = null
+}
+
+variable "cli_app_group" {
+  type        = string
+  description = "The group of the CLI workspace app."
+  default     = null
+}
+
+variable "cli_app_icon" {
+  type        = string
+  description = "The icon to use for the app."
+  default     = "/icon/amazon-q.svg"
+}
+
+variable "cli_app_display_name" {
+  type        = string
+  description = "The display name of the CLI workspace app."
+  default     = "Amazon Q CLI"
+}
+
+variable "cli_app_slug" {
+  type        = string
+  description = "The slug of the CLI workspace app."
+  default     = "amazon-q-cli"
+}
+
 variable "experiment_auth_tarball" {
   type        = string
   description = "Base64 encoded, zstd compressed tarball of a pre-authenticated ~/.local/share/amazon-q directory. After running `q login` on another machine, you may generate it with: `cd ~/.local/share/amazon-q && tar -c . | zstd | base64 -w 0`"
@@ -122,6 +206,24 @@ variable "ai_prompt" {
   default     = "Please help me with my coding tasks. I'll provide specific instructions as needed."
 }
 
+variable "pre_install_script" {
+  type        = string
+  description = "Custom script to run before installing the agent used by AgentAPI."
+  default     = null
+}
+
+variable "post_install_script" {
+  type        = string
+  description = "Custom script to run after installing the agent used by AgentAPI."
+  default     = null
+}
+
+variable "module_dir_name" {
+  type        = string
+  description = "Name of the subdirectory in the home directory for module files."
+  default     = ".amazon-q-module"
+}
+
 locals {
   encoded_pre_install_script  = var.experiment_pre_install_script != null ? base64encode(var.experiment_pre_install_script) : ""
   encoded_post_install_script = var.experiment_post_install_script != null ? base64encode(var.experiment_post_install_script) : ""
@@ -132,56 +234,72 @@ locals {
 
     ${var.ai_prompt}
   EOT
+  app_slug                    = "amazon-q"
+  base_extensions             = <<-EOT
+coder:
+  args:
+  - exp
+  - mcp
+  - server
+  - --allowed-tools
+  - coder_report_task
+  cmd: coder
+  description: Report ALL tasks and statuses (in progress, done, failed) you are working on.
+  enabled: true
+  envs:
+    CODER_MCP_APP_STATUS_SLUG: ${local.app_slug}
+  name: Coder
+  timeout: 3000
+  type: stdio
+EOT
+  # Add two spaces to each line of extensions to match YAML structure
+  formatted_base              = "  ${replace(trimspace(local.base_extensions), "\n", "\n  ")}"
+  combined_extensions         = <<-EOT
+extensions:
+${local.formatted_base}
+EOT
+  install_script              = file("${path.module}/scripts/install.sh")
+  start_script                = file("${path.module}/scripts/start.sh")
 }
 
-resource "coder_script" "amazon_q" {
-  agent_id     = var.agent_id
-  display_name = "Amazon Q"
-  icon         = var.icon
-  script       = <<-EOT
+module "agentapi" {
+  source  = "registry.coder.com/coder/agentapi/coder"
+  version = "1.1.1"
+
+  agent_id             = var.agent_id
+  web_app_slug         = local.app_slug
+  web_app_order        = var.web_app_order
+  web_app_group        = var.web_app_group
+  web_app_icon         = var.web_app_icon
+  web_app_display_name = var.web_app_display_name
+  cli_app              = var.cli_app
+  cli_app_order        = var.cli_app_order
+  cli_app_group        = var.cli_app_group
+  cli_app_icon         = var.cli_app_icon
+  cli_app_display_name = var.cli_app_display_name
+  cli_app_slug         = var.cli_app_slug
+  module_dir_name      = var.module_dir_name
+  install_agentapi     = var.install_agentapi
+  agentapi_version     = var.agentapi_version
+  agentapi_subdomain   = var.agentapi_subdomain
+  agentapi_port        = var.agentapi_port
+  pre_install_script   = var.pre_install_script
+  post_install_script  = var.post_install_script
+  start_script         = local.start_script
+  install_script       = <<-EOT
     #!/bin/bash
     set -o errexit
     set -o pipefail
 
-    command_exists() {
-      command -v "$1" >/dev/null 2>&1
-    }
+    echo -n '${base64encode(local.install_script)}' | base64 -d > /tmp/install.sh
+    chmod +x /tmp/install.sh
 
-    if [ -n "${local.encoded_pre_install_script}" ]; then
-      echo "Running pre-install script..."
-      echo "${local.encoded_pre_install_script}" | base64 -d > /tmp/pre_install.sh
-      chmod +x /tmp/pre_install.sh
-      /tmp/pre_install.sh
-    fi
-
-    if [ "${var.install_amazon_q}" = "true" ]; then
-      echo "Installing Amazon Q..."
-      PREV_DIR="$PWD"
-      TMP_DIR="$(mktemp -d)"
-      cd "$TMP_DIR"
-
-      ARCH="$(uname -m)"
-      case "$ARCH" in
-        "x86_64")
-          Q_URL="https://desktop-release.q.us-east-1.amazonaws.com/${var.amazon_q_version}/q-x86_64-linux.zip"
-          ;;
-        "aarch64"|"arm64")
-          Q_URL="https://desktop-release.codewhisperer.us-east-1.amazonaws.com/${var.amazon_q_version}/q-aarch64-linux.zip"
-          ;;
-        *)
-          echo "Error: Unsupported architecture: $ARCH. Amazon Q only supports x86_64 and arm64."
-          exit 1
-          ;;
-      esac
-
-      echo "Downloading Amazon Q for $ARCH..."
-      curl --proto '=https' --tlsv1.2 -sSf "$Q_URL" -o "q.zip"
-      unzip q.zip
-      ./q/install.sh --no-confirm
-      cd "$PREV_DIR"
-      export PATH="$PATH:$HOME/.local/bin"
-      echo "Installed Amazon Q version: $(q --version)"
-    fi
+    ARG_PROVIDER='amazon-q' \
+    ARG_MODEL='default' \
+    ARG_GOOSE_CONFIG="$(echo -n '${base64encode(local.combined_extensions)}' | base64 -d)" \
+    ARG_INSTALL='${var.install_amazon_q}' \
+    ARG_GOOSE_VERSION='${var.amazon_q_version}' \
+    /tmp/install.sh
 
     echo "Extracting auth tarball..."
     PREV_DIR="$PWD"
@@ -200,6 +318,13 @@ resource "coder_script" "amazon_q" {
       echo "Added Coder MCP server to Amazon Q configuration"
     fi
 
+    if [ -n "${local.encoded_pre_install_script}" ]; then
+      echo "Running pre-install script..."
+      echo "${local.encoded_pre_install_script}" | base64 -d > /tmp/pre_install.sh
+      chmod +x /tmp/pre_install.sh
+      /tmp/pre_install.sh
+    fi
+
     if [ -n "${local.encoded_post_install_script}" ]; then
       echo "Running post-install script..."
       echo "${local.encoded_post_install_script}" | base64 -d > /tmp/post_install.sh
@@ -216,7 +341,7 @@ resource "coder_script" "amazon_q" {
     if [ "${var.experiment_use_tmux}" = "true" ]; then
       echo "Running Amazon Q in the background with tmux..."
 
-      if ! command_exists tmux; then
+      if ! command -v tmux >/dev/null 2>&1; then
         echo "Error: tmux is not installed. Please install tmux manually."
         exit 1
       fi
@@ -236,7 +361,7 @@ resource "coder_script" "amazon_q" {
     if [ "${var.experiment_use_screen}" = "true" ]; then
       echo "Running Amazon Q in the background..."
 
-      if ! command_exists screen; then
+      if ! command -v screen >/dev/null 2>&1; then
         echo "Error: screen is not installed. Please install screen manually."
         exit 1
       fi
@@ -272,16 +397,16 @@ resource "coder_script" "amazon_q" {
       sleep 5
       screen -S amazon-q -X stuff "^M"
     else
-      if ! command_exists q; then
+      if ! command -v q >/dev/null 2>&1; then
         echo "Error: Amazon Q is not installed. Please enable install_amazon_q or install it manually."
         exit 1
       fi
     fi
-    EOT
-  run_on_start = true
+  EOT
 }
 
 resource "coder_app" "amazon_q" {
+  count        = var.install_agentapi ? 0 : 1
   slug         = "amazon-q"
   display_name = "Amazon Q"
   agent_id     = var.agent_id
@@ -316,4 +441,11 @@ resource "coder_app" "amazon_q" {
   icon         = var.icon
   order        = var.order
   group        = var.group
+}
+
+resource "coder_ai_task" "amazon_q" {
+  count = var.install_agentapi ? 1 : 0
+  sidebar_app {
+    id = module.agentapi.coder_app_agentapi_web.id
+  }
 }

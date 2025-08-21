@@ -8,7 +8,7 @@ tags: [agent, ai, aws, amazon-q]
 
 # Amazon Q
 
-Run [Amazon Q](https://aws.amazon.com/q/) in your workspace to access Amazon's AI coding assistant. This module installs and launches Amazon Q, with support for background operation, task reporting, and custom pre/post install scripts.
+Run [Amazon Q](https://aws.amazon.com/q/) in your workspace to access Amazon's AI coding assistant. This module installs and launches Amazon Q, with support for background operation, task reporting, custom pre/post install scripts, and integration with Coder Tasks and AgentAPI for enhanced web chat interface.
 
 ```tf
 module "amazon-q" {
@@ -77,6 +77,20 @@ module "amazon-q" {
 
 ## Examples
 
+### Run Amazon Q with AgentAPI and Tasks support (Recommended)
+
+```tf
+module "amazon-q" {
+  source                  = "registry.coder.com/coder/amazon-q/coder"
+  version                 = "1.1.2"
+  agent_id                = coder_agent.example.id
+  experiment_auth_tarball = var.amazon_q_auth_tarball
+  install_agentapi        = true
+  web_app_display_name    = "Amazon Q"
+  web_app_icon            = "/icon/amazon-q.svg"
+}
+```
+
 ### Run Amazon Q in the background with tmux
 
 ```tf
@@ -114,8 +128,31 @@ module "amazon-q" {
 }
 ```
 
+### Enable CLI access with AgentAPI
+
+```tf
+module "amazon-q" {
+  source               = "registry.coder.com/coder/amazon-q/coder"
+  version              = "1.1.2"
+  agent_id             = coder_agent.example.id
+  experiment_auth_tarball = var.amazon_q_auth_tarball
+  install_agentapi     = true
+  cli_app              = true
+  cli_app_display_name = "Amazon Q CLI"
+  cli_app_icon         = "/icon/amazon-q.svg"
+}
+```
+
 ## Notes
 
 - Only one of `experiment_use_screen` or `experiment_use_tmux` can be true at a time.
 - If neither is set, Amazon Q runs in the foreground.
 - For more details, see the [main.tf](./main.tf) source.
+
+## Tasks Integration
+
+When using AgentAPI (enabled by default), Amazon Q will automatically report task progress to the Coder Tasks UI. This provides real-time visibility into what Amazon Q is working on and its current status.
+
+## AgentAPI Web Interface
+
+When AgentAPI is enabled, a web interface is provided for interacting with Amazon Q through a chat interface. This interface supports all the features of the command-line version while providing a more user-friendly experience.
