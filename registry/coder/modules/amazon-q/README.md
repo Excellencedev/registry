@@ -8,7 +8,7 @@ tags: [agent, ai, aws, amazon-q]
 
 # Amazon Q
 
-Run [Amazon Q](https://aws.amazon.com/q/) in your workspace to access Amazon's AI coding assistant. This module installs and launches Amazon Q, with support for background operation, task reporting, and custom pre/post install scripts.
+Run [Amazon Q](https://aws.amazon.com/q/) in your workspace to access Amazon's AI coding assistant. This module installs and launches Amazon Q, with support for background operation, task reporting, custom pre/post install scripts, and integration with Coder Tasks and AgentAPI for enhanced web chat interface.
 
 ```tf
 module "amazon-q" {
@@ -64,58 +64,122 @@ module "amazon-q" {
     type    = string
     default = "PASTE_LONG_STRING_HERE"
   }
-  ```
-
-**Note:**
-
-- You must re-generate the tarball if you log out or re-authenticate Amazon Q on your local machine.
-- This process is required for each user who wants to use Amazon Q in their workspace.
-
-[Reference: Amazon Q documentation](https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/generate-docs.html)
-
-</details>
 
 ## Examples
 
-### Run Amazon Q in the background with tmux
+### Run in the background and report tasks (Experimental)
+
+> This functionality is in early access as of Coder v2.21 and is still evolving.
+> For now, we recommend testing it in a demo or staging environment,
+> rather than deploying to production
+>
+> Learn more in [the Coder documentation](https://coder.com/docs/tutorials/ai-agents)
+>
+> Join our [Discord channel](https://discord.gg/coder) or
+> [contact us](https://coder.com/contact) to get help or share feedback.
 
 ```tf
-module "amazon-q" {
-  source                  = "registry.coder.com/coder/amazon-q/coder"
-  version                 = "1.1.2"
-  agent_id                = coder_agent.example.id
-  experiment_auth_tarball = var.amazon_q_auth_tarball
-  experiment_use_tmux     = true
+variable "amazon_q_auth_tarball" {
+  type        = string
+  description = "The base64-encoded Amazon Q authentication tarball"
+  sensitive   = true
 }
-```
 
-### Enable task reporting (experimental)
+module "coder-login" {
+  count    = data.coder_workspace.me.start_count
+  source   = "registry.coder.com/coder/coder-login/coder"
+  version  = "1.0.15"
+  agent_id = coder_agent.example.id
+}
 
-```tf
+data "coder_parameter" "ai_prompt" {
+  type        = "string"
+  name        = "AI Prompt"
+  default     = ""
+  description = "Write a prompt for Amazon Q"
+  mutable     = true
+}
+
+# Set the prompt for Amazon Q via environment variables
+resource "coder_agent" "main" {
+  # ...
+  env = {
+    CODER_MCP_AMAZON_Q_TASK_PROMPT = data.coder_parameter.ai_prompt.value
+    CODER_MCP_APP_STATUS_SLUG      = "amazon-q"
+  }
+}
+
 module "amazon-q" {
-  source                  = "registry.coder.com/coder/amazon-q/coder"
-  version                 = "1.1.2"
-  agent_id                = coder_agent.example.id
-  experiment_auth_tarball = var.amazon_q_auth_tarball
+  count              = data.coder_workspace.me.start_count
+  source             = "registry.coder.com/coder/amazon-q/coder"
+  version            = "1.1.2"
+  agent_id           = coder_agent.example.id
+  auth_tarball       = var.amazon_q_auth_tarball
+
+  # Enable experimental features
   experiment_report_tasks = true
 }
 ```
 
-### Run custom scripts before/after install
+## Run standalone
+
+Run Amazon Q as a standalone app in your workspace. This will install Amazon Q and run it without any task reporting to the Coder UI.
 
 ```tf
 module "amazon-q" {
-  source                         = "registry.coder.com/coder/amazon-q/coder"
-  version                        = "1.1.2"
-  agent_id                       = coder_agent.example.id
-  experiment_auth_tarball        = var.amazon_q_auth_tarball
-  experiment_pre_install_script  = "echo Pre-install!"
-  experiment_post_install_script = "echo Post-install!"
+  source        = "registry.coder.com/coder/amazon-q/coder"
+  version       = "1.1.2"
+  agent_id      = coder_agent.example.id
+  auth_tarball  = var.amazon_q_auth_tarball
+
+  # Icon is not available in Coder v2.20 and below, so we'll use a custom icon URL
+  icon = "https://raw.githubusercontent.com/coder/registry/main/.icons/amazon-q.svg"
 }
 ```
 
-## Notes
+## Troubleshooting
 
-- Only one of `experiment_use_screen` or `experiment_use_tmux` can be true at a time.
-- If neither is set, Amazon Q runs in the foreground.
+The module will create log files in the workspace's `~/.amazon-q-module` directory. If you run into any issues, look at them for more information. Q runs in the foreground.
 - For more details, see the [main.tf](./main.tf) source.
+
+## Using with Coder Tasks Template
+
+To use Amazon Q with the Coder Tasks template:
+
+1. First, deploy the [Tasks on Docker](https://registry.coder.com/templates/coder-labs/tasks-docker) template
+2. Replace the Claude Code module with the Amazon Q module in the template
+3. Add your Amazon Q authentication tarball as a parameter
+
+Example configuration in the Tasks template:
+
+```tf
+variable "amazon_q_auth_tarball" {
+  type        = string
+  description = "The base64-encoded Amazon Q authentication tarball"
+  sensitive   = true
+}
+
+module "amazon-q" {
+  count               = data.coder_workspace.me.start_count
+  source              = "registry.coder.com/coder/amazon-q/coder"
+  version             = "1.1.2"
+  agent_id            = coder_agent.main.id
+  auth_tarball        = var.amazon_q_auth_tarball
+  folder              = "/home/coder/projects"
+  install_amazon_q    = true
+  amazon_q_version    = "latest"
+  order               = 999
+
+  experiment_post_install_script = data.coder_parameter.setup_script.value
+
+  # This enables Coder Tasks
+  experiment_report_tasks = true
+}
+```
+
+## Tasks Integration
+
+When using AgentAPI (enabled by default), Amazon Q will automatically report task progress to the Coder Tasks UI. This provides real-time visibility into what Amazon Q is working on and its current status.
+## AgentAPI Web Interface
+
+When AgentAPI is enabled, a web interface is provided for interacting with Amazon Q through a chat interface. This interface supports all the features of the command-line version while providing a more user-friendly experience.
